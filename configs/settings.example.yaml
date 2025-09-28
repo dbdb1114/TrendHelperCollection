@@ -1,0 +1,16 @@
+env: ${APP_ENV}
+timezone: UTC
+
+database:
+  url: ${DATABASE_URL}
+
+redis:
+  url: ${REDIS_URL}
+
+apis:
+  youtube: ${YOUTUBE_API_KEY}
+  anthropic: ${ANTHROPIC_API_KEY}
+
+scheduler:
+  interval_minutes: 60
+

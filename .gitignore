@@ -1,0 +1,15 @@
+.env
+__pycache__/
+*.pyc
+*.pyo
+*.DS_Store
+.mypy_cache/
+.pytest_cache/
+.coverage
+dist/
+build/
+.eggs/
+.cache/
+.ipynb_checkpoints/
+
+.DS_Store
