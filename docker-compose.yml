@@ -1,0 +1,67 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: trendhelper-postgres
+    environment:
+      POSTGRES_DB: trendhelper
+      POSTGRES_USER: trendhelper
+      POSTGRES_PASSWORD: trendhelper_dev
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --locale=C"
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U trendhelper -d trendhelper"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - trendhelper-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: trendhelper-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - trendhelper-network
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: trendhelper-app
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql+psycopg://trendhelper:trendhelper_dev@postgres:5432/trendhelper
+      - REDIS_URL=redis://redis:6379/0
+      - APP_ENV=development
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - trendhelper-network
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  trendhelper-network:
+    driver: bridge

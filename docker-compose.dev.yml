@@ -1,0 +1,24 @@
+version: '3.8'
+
+# Development override for docker-compose.yml
+services:
+  app:
+    build:
+      target: development
+    volumes:
+      - .:/app
+      - /app/.venv
+    environment:
+      - APP_ENV=development
+      - PYTHONPATH=/app
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+
+  postgres:
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_PASSWORD: trendhelper_dev
+
+  redis:
+    ports:
+      - "6379:6379"
