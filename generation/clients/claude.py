@@ -5,7 +5,8 @@ import time
 from typing import Dict, Any
 from pydantic_settings import BaseSettings
 
-from generation.schemas import IdeaRequest, IdeaResponse, GenerationMetadata
+from generation.schemas.idea import IdeaRequest, IdeaResponse, GenerationMetadata
+from generation.clients.model_client import IdeaModelClient
 
 logger = logging.getLogger(__name__)
 
@@ -15,8 +16,9 @@ class ClaudeSettings(BaseSettings):
 
     class Config:
         env_file = ".env"
+        extra = "ignore"
 
-class ClaudeClient:
+class ClaudeClient(IdeaModelClient):
     def __init__(self):
         self.settings = ClaudeSettings()
         self.client = httpx.Client(
