@@ -36,6 +36,7 @@ class VelocityAnalyzer:
         try:
             logger.info("Starting velocity analysis", extra={
                 "trace_id": trace_id,
+                "job": "analyzer_velocity",
                 "window_hours": window_hours,
                 "top_n": top_n
             })
@@ -55,6 +56,8 @@ class VelocityAnalyzer:
 
             logger.info(f"Velocity analysis completed", extra={
                 "trace_id": trace_id,
+                "job": "analyzer_velocity",
+                "window_hours": window_hours,
                 "total_videos": len(velocity_df),
                 "top_results": len(top_results)
             })
@@ -62,7 +65,10 @@ class VelocityAnalyzer:
             return top_results
 
         except Exception as e:
-            logger.error(f"Velocity analysis failed: {e}", extra={"trace_id": trace_id})
+            logger.error(f"Velocity analysis failed: {e}", extra={
+                "trace_id": trace_id,
+                "job": "analyzer_velocity"
+            })
             raise
 
     def _fetch_metrics_data(self, window_hours: int, trace_id: str) -> pd.DataFrame:
@@ -160,17 +166,18 @@ class VelocityAnalyzer:
             raise
 
     def _clip_outliers(self, df: pd.DataFrame, trace_id: str) -> pd.DataFrame:
-        """Clip top 1% outliers to reduce impact of anomalies"""
+        """Clip top 1% outliers by capping values at 99th percentile"""
         try:
             original_count = len(df)
             percentile_99 = df['views_per_min'].quantile(0.99)
 
-            df_clipped = df[df['views_per_min'] <= percentile_99].copy()
+            df_clipped = df.copy()
+            df_clipped['views_per_min'] = df_clipped['views_per_min'].clip(upper=percentile_99)
 
             logger.info(f"Outlier clipping applied", extra={
                 "trace_id": trace_id,
                 "original_count": original_count,
-                "clipped_count": len(df_clipped),
+                "values_clipped": (df['views_per_min'] > percentile_99).sum(),
                 "percentile_99_threshold": float(percentile_99)
             })
 
@@ -208,21 +215,21 @@ class VelocityAnalyzer:
 def main():
     parser = argparse.ArgumentParser(description="Analyze velocity of trending videos")
     parser.add_argument("--window", type=int, default=3, help="Time window in hours (default: 3)")
-    parser.add_argument("--top", type=int, default=10, help="Top N results (default: 10)")
-    parser.add_argument("--output", help="Output file path (optional)")
+    parser.add_argument("--top-n", type=int, default=10, help="Top N results (default: 10)")
+    parser.add_argument("--out-file", help="Output file path (optional)")
 
     args = parser.parse_args()
 
     setup_json_logging()
 
     with VelocityAnalyzer() as analyzer:
-        results = analyzer.analyze_velocity(args.window, args.top)
+        results = analyzer.analyze_velocity(args.window, args.top_n)
 
         output_data = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "analysis_params": {
                 "window_hours": args.window,
-                "top_n": args.top
+                "top_n": args.top_n
             },
             "results": results
         }
@@ -230,10 +237,10 @@ def main():
         # Output results
         json_output = json.dumps(output_data, indent=2, ensure_ascii=False)
 
-        if args.output:
-            with open(args.output, 'w', encoding='utf-8') as f:
+        if args.out_file:
+            with open(args.out_file, 'w', encoding='utf-8') as f:
                 f.write(json_output)
-            print(f"Results saved to {args.output}")
+            print(f"Results saved to {args.out_file}")
         else:
             print(json_output)
 
