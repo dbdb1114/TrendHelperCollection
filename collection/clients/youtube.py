@@ -1,9 +1,12 @@
 import httpx
 import logging
+import asyncio
+import random
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timezone
 from pydantic import BaseModel
 from pydantic_settings import BaseSettings
+from tenacity import retry, stop_after_attempt, wait_exponential_jitter
 
 logger = logging.getLogger(__name__)
 
@@ -12,6 +15,7 @@ class YouTubeSettings(BaseSettings):
 
     class Config:
         env_file = ".env"
+        extra = "ignore"
 
 class YouTubeVideo(BaseModel):
     video_id: str
@@ -30,7 +34,10 @@ class YouTubeClient:
     def __init__(self):
         self.settings = YouTubeSettings()
         self.base_url = "https://www.googleapis.com/youtube/v3"
-        self.client = httpx.Client(timeout=30.0)
+        self.client = httpx.Client(
+            timeout=10.0,
+            limits=httpx.Limits(max_connections=5, max_keepalive_connections=2)
+        )
 
     def __enter__(self):
         return self
@@ -61,29 +68,51 @@ class YouTubeClient:
 
     def _fetch_videos_list(self, region_code: str, max_results: int) -> Dict[str, Any]:
         """Fetch mostPopular videos list"""
-        params = {
+        return self._make_request("videos", {
             "part": "id",
             "chart": "mostPopular",
             "regionCode": region_code,
-            "maxResults": max_results,
-            "key": self.settings.youtube_api_key
-        }
-
-        response = self.client.get(f"{self.base_url}/videos", params=params)
-        response.raise_for_status()
-        return response.json()
+            "maxResults": max_results
+        })
 
     def _fetch_videos_details(self, video_ids: List[str]) -> Dict[str, Any]:
         """Fetch detailed video information"""
-        params = {
+        return self._make_request("videos", {
             "part": "snippet,statistics",
-            "id": ",".join(video_ids),
+            "id": ",".join(video_ids)
+        })
+
+    @retry(
+        stop=stop_after_attempt(5),
+        wait=wait_exponential_jitter(initial=1, max=30, jitter=0.2),
+        retry_error_callback=lambda retry_state: logger.warning(
+            f"Retry {retry_state.attempt_number}: {retry_state.outcome.exception()}"
+        )
+    )
+    def _make_request(self, endpoint: str, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Make HTTP request with retry logic for 429/5xx errors"""
+        params = {
+            **params,
             "key": self.settings.youtube_api_key
         }
 
-        response = self.client.get(f"{self.base_url}/videos", params=params)
-        response.raise_for_status()
-        return response.json()
+        try:
+            response = self.client.get(f"{self.base_url}/{endpoint}", params=params)
+
+            # Retry on 429 (rate limit) and 5xx (server errors)
+            if response.status_code == 429 or response.status_code >= 500:
+                logger.warning(f"HTTP {response.status_code}: retrying request")
+                response.raise_for_status()
+
+            response.raise_for_status()
+            return response.json()
+
+        except httpx.HTTPStatusError as e:
+            logger.error(f"HTTP error {e.response.status_code}: {e}")
+            raise
+        except httpx.RequestError as e:
+            logger.error(f"Request error: {e}")
+            raise
 
     def _parse_videos(self, videos_data: Dict[str, Any], region_code: str) -> List[YouTubeVideo]:
         """Parse video data into YouTubeVideo models"""

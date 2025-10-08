@@ -11,6 +11,7 @@ class DatabaseSettings(BaseSettings):
 
     class Config:
         env_file = ".env"
+        extra = "ignore"
 
 # Initialize settings
 db_settings = DatabaseSettings()
