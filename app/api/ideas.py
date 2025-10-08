@@ -1,59 +1,95 @@
 import logging
-from datetime import datetime, timezone
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
+from sqlalchemy.orm import Session
 
-from generation.clients.claude import ClaudeClient
-from generation.schemas import IdeaRequest, IdeaResponse
+from app.deps.common import get_db_session, get_trace_id, get_model_client
+from service.dto import IdeaRequestDTO, IdeaResponseDTO
+from service.ideas_service import create_ideas, DomainValidationError, DependencyError
+from generation.clients.model_client import IdeaModelClient
 
 logger = logging.getLogger(__name__)
-router = APIRouter()
+router = APIRouter(tags=["ideas"])
 
-@router.post("/ideas", response_model=IdeaResponse)
-async def generate_ideas(request: IdeaRequest) -> IdeaResponse:
+
+@router.post("/ideas", response_model=IdeaResponseDTO)
+def generate_ideas(
+    request: IdeaRequestDTO,
+    session: Session = Depends(get_db_session),
+    trace_id: str = Depends(get_trace_id),
+    model_client: IdeaModelClient = Depends(get_model_client)
+) -> IdeaResponseDTO:
     """Generate content ideas based on trending signals and keywords"""
-    trace_id = f"api_ideas_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
-
     try:
         logger.info("Ideas API request received", extra={
             "trace_id": trace_id,
             "keywords": request.keywords,
             "video_id": request.video_id,
-            "signals": request.signals
+            "signals": list(request.signals.keys())
         })
 
-        # Generate ideas using Claude
-        with ClaudeClient() as claude:
-            response = claude.generate_ideas(request, trace_id)
+        # Call service layer
+        response = create_ideas(
+            request,
+            trace_id=trace_id,
+            session=session,
+            model_client=model_client
+        )
 
         logger.info("Ideas API request completed", extra={
             "trace_id": trace_id,
             "titles_count": len(response.titles),
-            "tags_count": len(response.tags),
-            "retry_count": response.metadata.get("retry_count", 0)
+            "tags_count": len(response.tags)
         })
 
         return response
 
-    except Exception as e:
-        logger.error(f"Ideas API request failed: {e}", extra={
+    except DomainValidationError as e:
+        logger.warning("Domain validation error", extra={
             "trace_id": trace_id,
-            "error_type": type(e).__name__
+            "error_code": e.code,
+            "error_message": e.message
         })
-
         raise HTTPException(
-            status_code=500,
+            status_code=422,
             detail={
-                "error": "Content generation failed",
-                "trace_id": trace_id,
-                "type": type(e).__name__
+                "error": {
+                    "code": e.code,
+                    "message": e.message,
+                    "trace_id": trace_id
+                }
             }
         )
 
-@router.get("/ideas/health")
-async def ideas_health():
-    """Health check for ideas service"""
-    return {
-        "service": "ideas",
-        "status": "healthy",
-        "timestamp": datetime.now(timezone.utc).isoformat()
-    }
+    except DependencyError as e:
+        logger.error("Dependency error", extra={
+            "trace_id": trace_id,
+            "error_code": e.code,
+            "error_message": e.message
+        })
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": {
+                    "code": e.code,
+                    "message": e.message,
+                    "trace_id": trace_id
+                }
+            }
+        )
+
+    except Exception as e:
+        logger.error("Unexpected error", extra={
+            "trace_id": trace_id,
+            "error_type": type(e).__name__,
+            "error_message": str(e)
+        })
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": {
+                    "code": "INTERNAL_ERROR",
+                    "message": "Internal server error",
+                    "trace_id": trace_id
+                }
+            }
+        )
