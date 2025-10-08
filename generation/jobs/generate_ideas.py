@@ -65,8 +65,8 @@ def main():
         # Prepare output
         output_data = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
-            "request": request.dict(),
-            "response": response.dict()
+            "request": request.model_dump(),
+            "response": response.model_dump()
         }
 
         json_output = json.dumps(output_data, indent=2, ensure_ascii=False)

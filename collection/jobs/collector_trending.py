@@ -157,7 +157,10 @@ class TrendingCollector:
                     errors += 1
                     continue
 
-            self.db.bulk_insert_mappings(VideoMetricsSnapshot, snapshot_data)
+            # Use INSERT ... ON CONFLICT DO NOTHING for idempotency
+            stmt = insert(VideoMetricsSnapshot).values(snapshot_data)
+            stmt = stmt.on_conflict_do_nothing(index_elements=['video_id', 'captured_at'])
+            self.db.execute(stmt)
             self.db.commit()
 
             return len(snapshot_data), errors

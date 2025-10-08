@@ -43,7 +43,7 @@ class IdeaResponse(BaseModel):
 
     @validator('script_beats')
     def validate_script_guardrails(cls, v):
-        violations = validate_script_beats(v.dict())
+        violations = validate_script_beats(v.model_dump())
         if violations:
             raise ValueError(f"Script guardrail violations: {violations}")
         return v
